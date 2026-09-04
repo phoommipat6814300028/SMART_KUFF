@@ -1,0 +1,14 @@
+# Data and raster files
+Data/raw/
+Data/interim/
+Data/raster/
+*.tif
+*.asc
+*.nc
+*.SAFE
+
+# Python & R
+__pycache__/
+*.pyc
+.Rhistory
+.RData

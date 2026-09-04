@@ -92,3 +92,51 @@ Rscript Scripts/occupancy_model.R
 - หากต้องการอัปเดตโมเดล ให้ปรับแก้ในโฟลเดอร์ `Scripts/`
 - โปรดตรวจสอบให้แน่ใจว่าไม่ได้ push ไฟล์นามสกุล `.tif`, `.nc`, `.asc` หรือ `.SAFE` ขึ้น repository
 >>>>>>> 1ef8e7b443eeb231d44956be8d8e990a189d5412
+
+
+graph TD
+    %% การกำหนดสีให้แผนภาพ
+    classDef rawData fill:#f9f6f0,stroke:#333,stroke-width:2px;
+    classDef script fill:#d4e6f1,stroke:#2874a6,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef output fill:#d5f5e3,stroke:#239b56,stroke-width:2px;
+    classDef final fill:#fadbd8,stroke:#c0392b,stroke-width:3px;
+
+    %% ---------------------------------------------------
+    %% สายที่ 1: AI Pipeline
+    subgraph "1. การหาพื้นที่เสี่ยง (AI & Risk)"
+        A1(ภาพดาวเทียม Sentinel) ::: rawData --> S1[hkk_bigearthnet_extraction.py] ::: script
+        S1 -->|AI สกัดลักษณะพื้นที่ด้วย ResNet50 & PCA| O1(ข้อมูลสภาพแวดล้อมเชิงลึก) ::: output
+        O1 -.->|นำมาประเมินร่วมกับข้อมูลลาดตระเวน| O1_2(Risk_Surface.asc) ::: output
+    end
+
+    %% ---------------------------------------------------
+    %% สายที่ 2: Accessibility Pipeline
+    subgraph "2. ความยากลำบากในการเดินป่า (Accessibility)"
+        A2(ข้อมูลความสูง FABDEM) ::: rawData --> S2[Prepare_DEM_Slope_Tobler.py] ::: script
+        S2 -->|สมการความเร็วการเดิน Tobler| O2(แผนที่ความเร็วเดินป่า) ::: output
+        
+        A3(ข้อมูลถนน OSM) ::: rawData --> S3_1[Import_OSM_Roads.py] ::: script
+        S3_1 --> S3_2[Rasterize_OSM_Roads.py] ::: script
+        S3_2 --> O3(แผนที่จุดเริ่มต้นจากถนน) ::: output
+
+        O2 --> S4[calculate_accessibility.R] ::: script
+        O3 --> S4
+        S4 -->|รันโปรแกรม ConScape.jl| O4(Accessibility_RSP_stack.tif) ::: output
+    end
+
+    %% ---------------------------------------------------
+    %% สายที่ 3: Optimization Pipeline
+    subgraph "3. การสร้างเส้นทาง (Routing)"
+        A4(แผนที่ขอบเขตพื้นที่) ::: rawData --> S5[Route_Generation.py] ::: script
+        S5 -->|สุ่มสร้างเส้นทางจำลองนับหมื่นเส้น| O5(โฟลเดอร์ Routes/*.tif) ::: output
+        O5 --> S6[Create_Route_Matrix_from_tif.R] ::: script
+        S6 -->|แปลงเส้นทางเป็น Sparse Matrix| O6(HKK_Route_Matrix.rds) ::: output
+    end
+
+    %% ---------------------------------------------------
+    %% บทสรุป: รวมข้อมูลเข้าด้วยกัน
+    O1_2 -->|ส่งข้อมูลพื้นที่เสี่ยง| S7[Prelim_Optimization.R] ::: script
+    O6 -->|ส่งข้อมูลตัวเลือกเส้นทางทั้งหมด| S7
+    
+    S7 -->|ตัวแก้สมการ Gurobi ตัดสินใจเลือกเส้นทาง| F1((Integer_Patrol_Frequency.tif\nแผนที่ชี้เป้าความถี่ในการเดินป่า)) ::: final
+    S7 -->|คำนวณความเสี่ยงที่เหลือ| F2((Residual_Risk.tif\nแผนที่ความเสี่ยงคงเหลือ)) ::: final
